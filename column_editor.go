@@ -1,10 +1,10 @@
-// Copyright (c) 2013-2016 by Michael Dvorkin. All Rights Reserved.
+// Copyright (c) 2013-2019 by Michael Dvorkin and contributors. All Rights Reserved.
 // Use of this source code is governed by a MIT-style license that can
 // be found in the LICENSE file.
 
 package mop
 
-import `github.com/michaeldv/termbox-go`
+import `github.com/nsf/termbox-go`
 
 // ColumnEditor handles column sort order. When activated it highlights
 // current column name in the header, then waits for arrow keys (choose

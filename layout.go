@@ -1,26 +1,33 @@
-// Copyright (c) 2013-2016 by Michael Dvorkin. All Rights Reserved.
+// Copyright (c) 2013-2019 by Michael Dvorkin and contributors. All Rights Reserved.
 // Use of this source code is governed by a MIT-style license that can
 // be found in the LICENSE file.
 
 package mop
 
 import (
-	`bytes`
-	`fmt`
-	`reflect`
-	`regexp`
-	`strings`
-	`text/template`
-	`time`
+	"bytes"
+	"fmt"
+	"reflect"
+	"regexp"
+	"strings"
+	"text/template"
+	"time"
 )
+
+var currencies = map[string]string{
+	"RUB": "₽",
+	"GDB": "£",
+	"EUR": "€",
+	"JPY": "¥",
+}
 
 // Column describes formatting rules for individual column within the list
 // of stock quotes.
 type Column struct {
-	width     int                 // Column width.
-	name      string              // The name of the field in the Stock struct.
-	title     string              // Column title to display in the header.
-	formatter func(string) string // Optional function to format the contents of the column.
+	width     int                    // Column width.
+	name      string                 // The name of the field in the Stock struct.
+	title     string                 // Column title to display in the header.
+	formatter func(...string) string // Optional function to format the contents of the column.
 }
 
 // Layout is used to format and display all the collected data, i.e. market
@@ -28,6 +35,7 @@ type Column struct {
 type Layout struct {
 	columns        []Column           // List of stock quotes columns.
 	sorter         *Sorter            // Pointer to sorting receiver.
+	filter         *Filter            // Pointer to filtering receiver.
 	regex          *regexp.Regexp     // Pointer to regular expression to align decimal points.
 	marketTemplate *template.Template // Pointer to template to format market data.
 	quotesTemplate *template.Template // Pointer to template to format the list of stock quotes.
@@ -37,7 +45,7 @@ type Layout struct {
 func NewLayout() *Layout {
 	layout := &Layout{}
 	layout.columns = []Column{
-		{-7, `Ticker`, `Ticker`, nil},
+		{-10, `Ticker`, `Ticker`, nil},
 		{10, `LastTrade`, `Last`, currency},
 		{10, `Change`, `Change`, currency},
 		{10, `ChangePct`, `Change%`, last},
@@ -52,6 +60,8 @@ func NewLayout() *Layout {
 		{9, `Dividend`, `Dividend`, zero},
 		{9, `Yield`, `Yield`, percent},
 		{11, `MarketCap`, `MktCap`, currency},
+		{13, `PreOpen`, `PreMktChg%`, last},
+		{13, `AfterHours`, `AfterMktChg%`, last},
 	}
 	layout.regex = regexp.MustCompile(`(\.\d+)[BMK]?$`)
 	layout.marketTemplate = buildMarketTemplate()
@@ -80,6 +90,7 @@ func (layout *Layout) Market(market *Market) string {
 // and the list of given stock quotes. It returns formatted string with
 // all the necessary markup.
 func (layout *Layout) Quotes(quotes *Quotes) string {
+	zonename, _ := time.Now().In(time.Local).Zone()
 	if ok, err := quotes.Ok(); !ok { // If there was an error fetching stock quotes...
 		return err // then simply return the error string.
 	}
@@ -89,7 +100,7 @@ func (layout *Layout) Quotes(quotes *Quotes) string {
 		Header string  // Formatted header line.
 		Stocks []Stock // List of formatted stock quotes.
 	}{
-		time.Now().Format(`3:04:05pm PST`),
+		time.Now().Format(`3:04:05pm ` + zonename),
 		layout.Header(quotes.profile),
 		layout.prettify(quotes),
 	}
@@ -144,7 +155,7 @@ func (layout *Layout) prettify(quotes *Quotes) []Stock {
 			value := reflect.ValueOf(&stock).Elem().FieldByName(column.name).String()
 			if column.formatter != nil {
 				// ex. value = currency(value)
-				value = column.formatter(value)
+				value = column.formatter(value, stock.Currency)
 			}
 			// ex. pretty[i].Change = layout.pad(value, 10)
 			reflect.ValueOf(&pretty[i]).Elem().FieldByName(column.name).SetString(layout.pad(value, column.width))
@@ -152,6 +163,14 @@ func (layout *Layout) prettify(quotes *Quotes) []Stock {
 	}
 
 	profile := quotes.profile
+
+	if profile.filterExpression != nil {
+		if layout.filter == nil { // Initialize filter on first invocation.
+			layout.filter = NewFilter(profile)
+		}
+		pretty = layout.filter.Apply(pretty)
+	}
+
 	if layout.sorter == nil { // Initialize sorter on first invocation.
 		layout.sorter = NewSorter(profile)
 	}
@@ -198,7 +217,7 @@ func buildQuotesTemplate() *template.Template {
 
 
 {{.Header}}
-{{range.Stocks}}{{if .Advancing}}<green>{{end}}{{.Ticker}}{{.LastTrade}}{{.Change}}{{.ChangePct}}{{.Open}}{{.Low}}{{.High}}{{.Low52}}{{.High52}}{{.Volume}}{{.AvgVolume}}{{.PeRatio}}{{.Dividend}}{{.Yield}}{{.MarketCap}}</>
+{{range.Stocks}}{{if .Advancing}}<green>{{end}}{{.Ticker}}{{.LastTrade}}{{.Change}}{{.ChangePct}}{{.Open}}{{.Low}}{{.High}}{{.Low52}}{{.High52}}{{.Volume}}{{.AvgVolume}}{{.PeRatio}}{{.Dividend}}{{.Yield}}{{.MarketCap}}{{.PreOpen}}{{.AfterHours}}</>
 {{end}}`
 
 	return template.Must(template.New(`quotes`).Parse(markup))
@@ -246,61 +265,82 @@ func arrowFor(column int, profile *Profile) string {
 }
 
 //-----------------------------------------------------------------------------
-func blank(str string) string {
-	if len(str) == 3 && str[0:3] == `N/A` {
+func blank(str ...string) string {
+	if len(str) < 1 {
+		return "ERR"
+	}
+	if len(str[0]) == 3 && str[0][0:3] == `N/A` {
 		return `-`
 	}
 
-	return str
+	return str[0]
 }
 
 //-----------------------------------------------------------------------------
-func zero(str string) string {
-	if str == `0.00` {
+func zero(str ...string) string {
+	if len(str) < 2 {
+		return "ERR"
+	}
+	if str[0] == `0.00` {
 		return `-`
 	}
 
-	return currency(str)
+	return currency(str[0], str[1])
 }
 
 //-----------------------------------------------------------------------------
-func last(str string) string {
-	if len(str) >= 6 && str[0:6] == `N/A - ` {
-		return str[6:]
+func last(str ...string) string {
+	if len(str) < 1 {
+		return "ERR"
+	}
+	if len(str[0]) >= 6 && str[0][0:6] == `N/A - ` {
+		return str[0][6:]
 	}
 
-	return percent(str)
+	return percent(str[0])
 }
 
 //-----------------------------------------------------------------------------
-func currency(str string) string {
-	if str == `N/A` {
+func currency(str ...string) string {
+	if len(str) < 2 {
+		return "ERR"
+	}
+	//default to $
+	symbol := "$"
+	c, ok := currencies[str[1]]
+	if ok {
+		symbol = c
+	}
+	if str[0] == `N/A` || len(str[0]) == 0 {
 		return `-`
 	}
-	if sign := str[0:1]; sign == `+` || sign == `-` {
-		return sign + `$` + str[1:]
+	if sign := str[0][0:1]; sign == `+` || sign == `-` {
+		return sign + symbol + str[0][1:]
 	}
 
-	return `$` + str
+	return symbol + str[0]
 }
 
 // Returns percent value truncated at 2 decimal points.
 //-----------------------------------------------------------------------------
-func percent(str string) string {
-	if str == `N/A` {
+func percent(str ...string) string {
+	if len(str) < 1 {
+		return "ERR"
+	}
+	if str[0] == `N/A` || len(str[0]) == 0 {
 		return `-`
 	}
 
-	split := strings.Split(str, ".")
+	split := strings.Split(str[0], ".")
 	if len(split) == 2 {
 		digits := len(split[1])
 		if digits > 2 {
 			digits = 2
 		}
-		str = split[0] + "." + split[1][0:digits]
+		str[0] = split[0] + "." + split[1][0:digits]
 	}
-	if str[len(str)-1] != '%' {
-		str += `%`
+	if str[0][len(str)-1] != '%' {
+		str[0] += `%`
 	}
-	return str
+	return str[0]
 }

@@ -8,6 +8,9 @@ tmtags
 # Vim
 *.swp
 
+# Atom
+cmd/mop/debug
+
 # Other
 ~*
 *~
@@ -17,3 +20,4 @@ tmtags
 bin/mop*
 logs/*
 
+.idea

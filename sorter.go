@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 by Michael Dvorkin. All Rights Reserved.
+// Copyright (c) 2013-2019 by Michael Dvorkin and contributors. All Rights Reserved.
 // Use of this source code is governed by a MIT-style license that can
 // be found in the LICENSE file.
 
@@ -105,7 +105,7 @@ func (list byLastTradeDesc) Less(i, j int) bool {
 	return list.sortable[j].LastTrade < list.sortable[i].LastTrade
 }
 func (list byChangeDesc) Less(i, j int) bool {
-	return c(list.sortable[j].ChangePct) < c(list.sortable[i].ChangePct)
+	return c(list.sortable[j].Change) < c(list.sortable[i].Change)
 }
 func (list byChangePctDesc) Less(i, j int) bool {
 	return c(list.sortable[j].ChangePct) < c(list.sortable[i].ChangePct)
@@ -200,7 +200,13 @@ func (sorter *Sorter) SortByCurrentColumn(stocks []Stock) *Sorter {
 // The same exact method is used to sort by $Change and Change%. In both cases
 // we sort by the value of Change% so that multiple $0.00s get sorted proferly.
 func c(str string) float32 {
-	trimmed := strings.Replace(strings.Trim(str, ` %`), `$`, ``, 1)
+	c := "$"
+	for _, v := range currencies {
+		if strings.Contains(str,v) {
+			c = v
+		}
+	}
+	trimmed := strings.Replace(strings.Trim(str, ` %`), c, ``, 1)
 	value, _ := strconv.ParseFloat(trimmed, 32)
 	return float32(value)
 }
@@ -208,6 +214,10 @@ func c(str string) float32 {
 // When sorting by the market value we must first convert 42B etc. notations
 // to proper numeric values.
 func m(str string) float32 {
+	if len(str) == 0 {
+		return 0
+	}
+
 	multiplier := 1.0
 
 	switch str[len(str)-1 : len(str)] { // Check the last character.

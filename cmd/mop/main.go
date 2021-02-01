@@ -1,14 +1,21 @@
-// Copyright (c) 2013-2016 by Michael Dvorkin. All Rights Reserved.
+// Copyright (c) 2013-2019 by Michael Dvorkin and contributors. All Rights Reserved.
 // Use of this source code is governed by a MIT-style license that can
 // be found in the LICENSE file.
 
 package main
 
 import (
-	`github.com/mop-tracker/mop`
-	`github.com/michaeldv/termbox-go`
-	`time`
+	"flag"
+	"os/user"
+	"path"
+	"time"
+
+	"github.com/mop-tracker/mop"
+	"github.com/nsf/termbox-go"
 )
+
+// File name in user's home directory where we store the settings.
+const defaultProfile = `.moprc`
 
 const help = `Mop v0.2.0 -- Copyright (c) 2013-2016 by Michael Dvorkin. All Rights Reserved.
 NO WARRANTIES OF ANY KIND WHATSOEVER. SEE THE LICENSE FILE FOR DETAILS.
@@ -17,6 +24,8 @@ NO WARRANTIES OF ANY KIND WHATSOEVER. SEE THE LICENSE FILE FOR DETAILS.
    +       Add stocks to the list.
    -       Remove stocks from the list.
    ?       Display this help screen.
+   f       Set filtering expression.
+   F       Unset filtering expression.
    g       Group stocks by advancing/declining issues.
    o       Change column sort order.
    p       Pause market data and stock updates.
@@ -62,6 +71,11 @@ loop:
 					} else if event.Ch == '+' || event.Ch == '-' {
 						lineEditor = mop.NewLineEditor(screen, quotes)
 						lineEditor.Prompt(event.Ch)
+					} else if event.Ch == 'f' {
+						lineEditor = mop.NewLineEditor(screen, quotes)
+						lineEditor.Prompt(event.Ch)
+					} else if event.Ch == 'F' {
+						profile.SetFilter("")
 					} else if event.Ch == 'o' || event.Ch == 'O' {
 						columnEditor = mop.NewColumnEditor(screen, quotes)
 					} else if event.Ch == 'g' || event.Ch == 'G' {
@@ -119,6 +133,14 @@ func main() {
 	screen := mop.NewScreen()
 	defer screen.Close()
 
-	profile := mop.NewProfile()
+	usr, err := user.Current()
+	if err != nil {
+		panic(err)
+	}
+
+	profileName := flag.String("profile", path.Join(usr.HomeDir, defaultProfile), "path to profile")
+	flag.Parse()
+
+	profile := mop.NewProfile(*profileName)
 	mainLoop(screen, profile)
 }

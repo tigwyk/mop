@@ -1,11 +1,11 @@
-// Copyright (c) 2013-2016 by Michael Dvorkin. All Rights Reserved.
+// Copyright (c) 2013-2019 by Michael Dvorkin and contributors. All Rights Reserved.
 // Use of this source code is governed by a MIT-style license that can
 // be found in the LICENSE file.
 
 package mop
 
 import (
-	`github.com/michaeldv/termbox-go`
+	`github.com/nsf/termbox-go`
 	`regexp`
 	`strings`
 )

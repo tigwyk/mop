@@ -1,37 +1,38 @@
-// Copyright (c) 2013-2016 by Michael Dvorkin. All Rights Reserved.
+// Copyright (c) 2013-2019 by Michael Dvorkin and contributors. All Rights Reserved.
 // Use of this source code is governed by a MIT-style license that can
 // be found in the LICENSE file.
 
 package mop
 
 import (
-	`encoding/json`
-	`io/ioutil`
-	`os/user`
-	`sort`
-)
+	"encoding/json"
+	"io/ioutil"
+	"sort"
 
-// File name in user's home directory where we store the settings.
-const moprc = `/.moprc`
+	"github.com/Knetic/govaluate"
+)
 
 // Profile manages Mop program settings as defined by user (ex. list of
 // stock tickers). The settings are serialized using JSON and saved in
 // the ~/.moprc file.
 type Profile struct {
-	Tickers        []string // List of stock tickers to display.
-	MarketRefresh  int      // Time interval to refresh market data.
-	QuotesRefresh  int      // Time interval to refresh stock quotes.
-	SortColumn     int      // Column number by which we sort stock quotes.
-	Ascending      bool     // True when sort order is ascending.
-	Grouped        bool     // True when stocks are grouped by advancing/declining.
-	selectedColumn int      // Stores selected column number when the column editor is active.
+	Tickers          []string                       // List of stock tickers to display.
+	MarketRefresh    int                            // Time interval to refresh market data.
+	QuotesRefresh    int                            // Time interval to refresh stock quotes.
+	SortColumn       int                            // Column number by which we sort stock quotes.
+	Ascending        bool                           // True when sort order is ascending.
+	Grouped          bool                           // True when stocks are grouped by advancing/declining.
+	Filter           string                         // Filter in human form
+	filterExpression *govaluate.EvaluableExpression // The filter as a govaluate expression
+	selectedColumn   int                            // Stores selected column number when the column editor is active.
+	filename         string                         // Path to the file in which the configuration is stored
 }
 
 // Creates the profile and attempts to load the settings from ~/.moprc file.
 // If the file is not there it gets created with default values.
-func NewProfile() *Profile {
-	profile := &Profile{}
-	data, err := ioutil.ReadFile(profile.defaultFileName())
+func NewProfile(filename string) *Profile {
+	profile := &Profile{filename: filename}
+	data, err := ioutil.ReadFile(filename)
 	if err != nil { // Set default values:
 		profile.MarketRefresh = 12 // Market data gets fetched every 12s (5 times per minute).
 		profile.QuotesRefresh = 5  // Stock quotes get updated every 5s (12 times per minute).
@@ -39,9 +40,11 @@ func NewProfile() *Profile {
 		profile.Tickers = []string{`AAPL`, `C`, `GOOG`, `IBM`, `KO`, `ORCL`, `V`}
 		profile.SortColumn = 0   // Stock quotes are sorted by ticker name.
 		profile.Ascending = true // A to Z.
+		profile.Filter = ""
 		profile.Save()
 	} else {
 		json.Unmarshal(data, profile)
+		profile.SetFilter(profile.Filter)
 	}
 	profile.selectedColumn = -1
 
@@ -55,7 +58,7 @@ func (profile *Profile) Save() error {
 		return err
 	}
 
-	return ioutil.WriteFile(profile.defaultFileName(), data, 0644)
+	return ioutil.WriteFile(profile.filename, data, 0644)
 }
 
 // AddTickers updates the list of existing tikers to add the new ones making
@@ -124,11 +127,20 @@ func (profile *Profile) Regroup() error {
 	return profile.Save()
 }
 
-//-----------------------------------------------------------------------------
-func (profile *Profile) defaultFileName() string {
-	usr, err := user.Current()
-	if err != nil {
-		panic(err)
+// SetFilter creates a govaluate.EvaluableExpression.
+func (profile *Profile) SetFilter(filter string) {
+	if len(filter) > 0 {
+		var err error
+		profile.filterExpression, err = govaluate.NewEvaluableExpression(filter)
+
+		if err != nil {
+			panic(err)
+		}
+
+	} else if len(filter) == 0 && profile.filterExpression != nil {
+		profile.filterExpression = nil
 	}
-	return usr.HomeDir + moprc
+
+	profile.Filter = filter
+	profile.Save()
 }
